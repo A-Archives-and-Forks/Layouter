@@ -10,6 +10,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Layouter.Utility;
 using Path = System.IO.Path;
 using PluginEntry;
@@ -31,6 +32,11 @@ namespace Layouter.Plugins.Views
         private bool isCircleShape = true; // 是否为圆形
         private DispatcherTimer edgeCheckTimer;
         private DispatcherTimer autoHideTimer;
+        private Func<object> statusProvider;
+        private Func<object> tooltipProvider;
+        private Action doubleClickAction;
+        private bool isStatusModeEnabled = false;
+        private bool isCleanupRunning = false;
 
         public event EventHandler<SettingSavedEventArgs> OnSettingSaved;
 
@@ -54,6 +60,8 @@ namespace Layouter.Plugins.Views
             // 初始化自动隐藏定时器
             autoHideTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             autoHideTimer.Tick += AutoHideTimer_Tick;
+
+            Closing += FloatingWindow_Closing;
         }
 
         public FloatingWindow(PluginDescriptor pd) : this()
@@ -200,6 +208,13 @@ namespace Layouter.Plugins.Views
             Top = style.WindowPosition.Top;
             Opacity = style.Opacity;
 
+            if (Left < 0 || Top < 0)
+            {
+                var workArea = SystemParameters.WorkArea;
+                Left = workArea.Left + (workArea.Width - Width) / 2;
+                Top = workArea.Top + (workArea.Height - Height) / 2;
+            }
+
             // 保存显示时的尺寸
             showWidth = Width;
             showHeight = Height;
@@ -226,6 +241,83 @@ namespace Layouter.Plugins.Views
             MainBorder.CornerRadius = isCircleShape ? new CornerRadius(Width / 2) : new CornerRadius(8);
         }
 
+        public void ConfigureStatusProvider(Func<object> provider, Func<object> tooltipProvider, Action onDoubleClick, TimeSpan refreshInterval)
+        {
+            statusProvider = provider;
+            this.tooltipProvider = tooltipProvider;
+            doubleClickAction = onDoubleClick;
+            isStatusModeEnabled = provider != null;
+
+            if (!isStatusModeEnabled)
+            {
+                StatusTextBlock.Visibility = Visibility.Collapsed;
+                IconImage.Visibility = Visibility.Visible;
+                ToolTip = null;
+                MainBorder.ToolTip = null;
+                return;
+            }
+
+            IconImage.Visibility = Visibility.Collapsed;
+            StatusTextBlock.Visibility = Visibility.Visible;
+
+            RefreshInfoTimer?.Stop();
+            RefreshInfoTimer = new DispatcherTimer { Interval = refreshInterval };
+            RefreshInfoTimer.Tick += (s, e) => RefreshStatusText();
+            RefreshInfoTimer.Start();
+            RefreshStatusText();
+        }
+
+        private void RefreshStatusText()
+        {
+            if (!isStatusModeEnabled || isCleanupRunning || statusProvider == null)
+            {
+                return;
+            }
+
+            try
+            {
+                StatusTextBlock.Text = FormatStatus(statusProvider.Invoke());
+                if (tooltipProvider != null)
+                {
+                    var tooltipText = tooltipProvider.Invoke()?.ToString();
+                    ToolTip = tooltipText;
+                    MainBorder.ToolTip = tooltipText;
+                }
+            }
+            catch (Exception ex)
+            {
+                StatusTextBlock.Text = "--";
+                Log.Error($"Refresh floating status error: {ex.Message}");
+            }
+        }
+
+        private static string FormatStatus(object value)
+        {
+            if (value == null)
+            {
+                return "--";
+            }
+
+            if (value is double d)
+            {
+                return $"{d:F0}%";
+            }
+
+            if (value is float f)
+            {
+                return $"{f:F0}%";
+            }
+
+            if (value is int i)
+            {
+                return $"{i}%";
+            }
+
+            var text = value.ToString() ?? "--";
+            var lineBreakIndex = text.IndexOfAny(new[] { '\r', '\n' });
+            return lineBreakIndex > 0 ? text.Substring(0, lineBreakIndex) : text;
+        }
+
         #endregion
 
         #region 事件处理
@@ -245,8 +337,18 @@ namespace Layouter.Plugins.Views
             }
 
             // 显示悬停菜单
-            IconImage.Visibility = Visibility.Collapsed;
-            HoverMenu.Visibility = Visibility.Visible;
+            if (HoverMenu.Children.Count > 0)
+            {
+                IconImage.Visibility = Visibility.Collapsed;
+                StatusTextBlock.Visibility = Visibility.Collapsed;
+                HoverMenu.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                IconImage.Visibility = isStatusModeEnabled ? Visibility.Collapsed : Visibility.Visible;
+                StatusTextBlock.Visibility = isStatusModeEnabled ? Visibility.Visible : Visibility.Collapsed;
+                HoverMenu.Visibility = Visibility.Collapsed;
+            }
         }
 
         private void Window_MouseLeave(object sender, MouseEventArgs e)
@@ -258,7 +360,8 @@ namespace Layouter.Plugins.Views
             }
 
             // 隐藏悬停菜单
-            IconImage.Visibility = Visibility.Visible;
+            IconImage.Visibility = isStatusModeEnabled ? Visibility.Collapsed : Visibility.Visible;
+            StatusTextBlock.Visibility = isStatusModeEnabled ? Visibility.Visible : Visibility.Collapsed;
             HoverMenu.Visibility = Visibility.Collapsed;
 
             // 如果启用了自动隐藏，启动定时器
@@ -270,8 +373,80 @@ namespace Layouter.Plugins.Views
 
         private void MainBorder_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
+            if (e.ClickCount >= 2 && doubleClickAction != null)
+            {
+                e.Handled = true;
+                RunDoubleClickAction();
+                return;
+            }
+
             // 拖动窗口
             DragMove();
+        }
+
+        private async void RunDoubleClickAction()
+        {
+            if (isCleanupRunning)
+            {
+                return;
+            }
+
+            try
+            {
+                isCleanupRunning = true;
+                StatusTextBlock.Visibility = Visibility.Visible;
+                IconImage.Visibility = Visibility.Collapsed;
+                HoverMenu.Visibility = Visibility.Collapsed;
+                StatusTextBlock.Text = "整理";
+                StartCleanupAnimation();
+
+                await Task.Run(() => doubleClickAction?.Invoke());
+                RefreshStatusText();
+            }
+            catch (Exception ex)
+            {
+                StatusTextBlock.Text = "失败";
+                Log.Error($"Floating double click action error: {ex.Message}");
+            }
+            finally
+            {
+                StopCleanupAnimation();
+                isCleanupRunning = false;
+            }
+        }
+
+        private void StartCleanupAnimation()
+        {
+            MainBorder.RenderTransformOrigin = new Point(0.5, 0.5);
+            var transform = new ScaleTransform(1, 1);
+            MainBorder.RenderTransform = transform;
+
+            var animation = new DoubleAnimation(1, 0.88, TimeSpan.FromMilliseconds(280))
+            {
+                AutoReverse = true,
+                RepeatBehavior = RepeatBehavior.Forever
+            };
+
+            transform.BeginAnimation(ScaleTransform.ScaleXProperty, animation);
+            transform.BeginAnimation(ScaleTransform.ScaleYProperty, animation);
+        }
+
+        private void StopCleanupAnimation()
+        {
+            if (MainBorder.RenderTransform is ScaleTransform transform)
+            {
+                transform.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+                transform.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+            }
+
+            MainBorder.RenderTransform = null;
+        }
+
+        private void FloatingWindow_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            RefreshInfoTimer?.Stop();
+            edgeCheckTimer?.Stop();
+            autoHideTimer?.Stop();
         }
 
         private void MainBorder_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
@@ -465,14 +640,14 @@ namespace Layouter.Plugins.Views
             Window settingsWindow = new Window
             {
                 Title = "悬浮窗设置",
-                Width = 300,
-                Height = 400,
+                Width = 360,
+                Height = 560,
                 WindowStartupLocation = WindowStartupLocation.CenterScreen,
                 ResizeMode = ResizeMode.NoResize
             };
 
             // 创建设置面板
-            StackPanel panel = new StackPanel { Margin = new Thickness(10) };
+            StackPanel panel = new StackPanel { Margin = new Thickness(16) };
 
             // 添加设置项
             AddColorPicker(panel, "渐变色1", GradientStop1.Color, color =>
@@ -490,6 +665,17 @@ namespace Layouter.Plugins.Views
             AddSlider(panel, "透明度", Opacity, 0.1, 1.0, value =>
             {
                 Opacity = value;
+                SaveSettings();
+            });
+
+            AddSizeSlider(panel, "窗口大小", Math.Max(showWidth, showHeight), 44, 120, value =>
+            {
+                Width = value;
+                Height = value;
+                showWidth = value;
+                showHeight = value;
+                MainBorder.CornerRadius = isCircleShape ? new CornerRadius(value / 2) : new CornerRadius(8);
+                StatusTextBlock.FontSize = Math.Max(12, Math.Round(value * 0.27));
                 SaveSettings();
             });
 
@@ -520,7 +706,11 @@ namespace Layouter.Plugins.Views
             okButton.Click += (s, e) => settingsWindow.Close();
             panel.Children.Add(okButton);
 
-            settingsWindow.Content = panel;
+            settingsWindow.Content = new ScrollViewer
+            {
+                Content = panel,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto
+            };
             settingsWindow.ShowDialog();
         }
 
@@ -530,24 +720,39 @@ namespace Layouter.Plugins.Views
             StackPanel itemPanel = new StackPanel { Margin = new Thickness(0, 5, 0, 5) };
             itemPanel.Children.Add(new TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 5) });
 
-            StackPanel colorPanel = new StackPanel { Orientation = Orientation.Horizontal };
+            WrapPanel colorPanel = new WrapPanel { MaxWidth = 300 };
 
             // 预定义的颜色选项
             Color[] colors = new Color[] {
-                Colors.Red, Colors.Green, Colors.Blue, Colors.Yellow, Colors.Purple,
-                Colors.Orange, Colors.Pink, Colors.Cyan, Colors.Magenta, Colors.Lime
+                Color.FromRgb(59, 130, 246),
+                Color.FromRgb(14, 165, 233),
+                Color.FromRgb(6, 182, 212),
+                Color.FromRgb(45, 212, 191),
+                Color.FromRgb(16, 185, 129),
+                Color.FromRgb(34, 197, 94),
+                Color.FromRgb(132, 204, 22),
+                Color.FromRgb(250, 204, 21),
+                Color.FromRgb(245, 158, 11),
+                Color.FromRgb(249, 115, 22),
+                Color.FromRgb(244, 63, 94),
+                Color.FromRgb(236, 72, 153),
+                Color.FromRgb(217, 70, 239),
+                Color.FromRgb(168, 85, 247),
+                Color.FromRgb(139, 92, 246),
+                Color.FromRgb(99, 102, 241)
             };
 
             foreach (var color in colors)
             {
                 Border colorBorder = new Border
                 {
-                    Width = 20,
-                    Height = 20,
-                    Margin = new Thickness(2),
+                    Width = 26,
+                    Height = 26,
+                    Margin = new Thickness(3),
                     Background = new SolidColorBrush(color),
                     BorderThickness = new Thickness(1),
-                    BorderBrush = Brushes.Black
+                    BorderBrush = color == initialColor ? Brushes.White : new SolidColorBrush(Color.FromArgb(120, 255, 255, 255)),
+                    CornerRadius = new CornerRadius(6)
                 };
 
                 colorBorder.MouseLeftButtonDown += (s, e) =>
@@ -571,17 +776,62 @@ namespace Layouter.Plugins.Views
             {
                 Minimum = min,
                 Maximum = max,
+                Width = 230,
                 Value = initialValue,
                 IsSnapToTickEnabled = true,
                 TickFrequency = 0.1
             };
 
-            TextBlock valueText = new TextBlock { Text = initialValue.ToString("F1"), Margin = new Thickness(5, 0, 0, 0) };
+            TextBlock valueText = new TextBlock
+            {
+                Text = initialValue.ToString("F1"),
+                Width = 42,
+                Margin = new Thickness(8, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
 
             slider.ValueChanged += (s, e) =>
             {
                 double value = Math.Round(e.NewValue, 1);
                 valueText.Text = value.ToString("F1");
+                onValueChanged(value);
+            };
+
+            StackPanel sliderPanel = new StackPanel { Orientation = Orientation.Horizontal };
+            sliderPanel.Children.Add(slider);
+            sliderPanel.Children.Add(valueText);
+
+            itemPanel.Children.Add(sliderPanel);
+            panel.Children.Add(itemPanel);
+        }
+
+        private void AddSizeSlider(StackPanel panel, string label, double initialValue, double min, double max, Action<double> onValueChanged)
+        {
+            StackPanel itemPanel = new StackPanel { Margin = new Thickness(0, 8, 0, 8) };
+            itemPanel.Children.Add(new TextBlock { Text = label, Margin = new Thickness(0, 0, 0, 5) });
+
+            Slider slider = new Slider
+            {
+                Minimum = min,
+                Maximum = max,
+                Width = 230,
+                Value = initialValue,
+                IsSnapToTickEnabled = true,
+                TickFrequency = 1
+            };
+
+            TextBlock valueText = new TextBlock
+            {
+                Text = $"{Math.Round(initialValue):F0}px",
+                Width = 48,
+                Margin = new Thickness(8, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            slider.ValueChanged += (s, e) =>
+            {
+                double value = Math.Round(e.NewValue);
+                valueText.Text = $"{value:F0}px";
                 onValueChanged(value);
             };
 

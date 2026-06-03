@@ -375,6 +375,10 @@ namespace Layouter.Services
         public void RemoveWindow(string windowId)
         {
             var metadata = GetMetadata();
+            if (metadata?.WindowIds == null)
+            {
+                return;
+            }
             metadata.WindowIds.Remove(windowId);
 
             string json = JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true });

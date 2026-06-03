@@ -15,6 +15,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using CommunityToolkit.Mvvm.Input;
+using CommunityToolkit.Mvvm.DependencyInjection;
 using Layouter.Plugins.Controls;
 using Layouter.Services;
 using Layouter.Views;
@@ -40,7 +41,11 @@ namespace Layouter.Plugins
         public ICommand CreatePluginCommand { get; }
 
 
-        public PluginsManagerWindow()
+        public PluginsManagerWindow() : this(Ioc.Default.GetRequiredService<PluginManager>())
+        {
+        }
+
+        public PluginsManagerWindow(PluginManager pluginManager)
         {
             InitializeComponent();
 
@@ -49,12 +54,12 @@ namespace Layouter.Plugins
 
             Directory.CreateDirectory(pluginsDirectory);
 
-            pluginManager = new PluginManager(pluginsDirectory);
+            this.pluginManager = pluginManager;
             templateManager = new WindowTemplateManager(pluginManager);
 
-            pluginManager.PluginLoaded += PluginManager_PluginLoaded;
-            pluginManager.PluginStatusChanged += PluginManager_PluginStatusChanged;
-            pluginManager.PluginCodeLoaded += PluginManager_PluginCodeLoaded;
+            this.pluginManager.PluginLoaded += PluginManager_PluginLoaded;
+            this.pluginManager.PluginStatusChanged += PluginManager_PluginStatusChanged;
+            this.pluginManager.PluginCodeLoaded += PluginManager_PluginCodeLoaded;
             CreatePluginCommand = new RelayCommand(CreatePlugin);
 
             PluginsListView.ItemsSource = pluginViewModels;
@@ -69,8 +74,22 @@ namespace Layouter.Plugins
 
         private void RefreshPlugins()
         {
-            //pluginViewModels.Clear();
+            pluginViewModels.Clear();
             pluginManager.LoadPluginsMetadata();
+
+            foreach (var plugin in pluginManager.Plugins.Values)
+            {
+                pluginViewModels.Add(new PluginViewModel
+                {
+                    Id = plugin.Descriptor.Id,
+                    Name = plugin.Descriptor.Name,
+                    Version = plugin.Descriptor.Version,
+                    Description = plugin.Descriptor.Description,
+                    Author = plugin.Descriptor.Author,
+                    IsEnabled = plugin.Descriptor.IsEnabled,
+                    Plugin = plugin
+                });
+            }
 
             if (pluginManager.Plugins.Count == 0)
             {
@@ -90,8 +109,6 @@ namespace Layouter.Plugins
                 var existingPlugin = pluginViewModels.FirstOrDefault(p => p.Id == e.Plugin.Descriptor.Id);
                 if (existingPlugin == null)
                 {
-                    ShowPluginWindow(e.Plugin);
-
                     pluginViewModels.Add(new PluginViewModel
                     {
                         Id = e.Plugin.Descriptor.Id,
@@ -245,11 +262,13 @@ namespace Layouter.Plugins
         private void ClosePluginWindow(string pluginId)
         {
             // 查找并关闭与插件ID对应的所有窗口
-            foreach (Window window in Application.Current.Windows)
+            foreach (Window window in Application.Current.Windows.Cast<Window>().ToList())
             {
-                if (window.Tag is string windowPluginId && windowPluginId == pluginId)
-                {
+                var isMatchedByTag = window.Tag is string windowPluginId && windowPluginId == pluginId;
+                var isMatchedByPartitionId = window is DesktopManagerWindow desktopWindow && desktopWindow.WindowId == pluginId;
 
+                if (isMatchedByTag || isMatchedByPartitionId)
+                {
                     if (window is DesktopManagerWindow dmw)
                     {
                         PartitionDataService.Instance.HideWindow(dmw);
@@ -385,6 +404,47 @@ namespace Layouter.Plugins
             }
         }
 
+        private void EditPlugin_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is not Button button || button.Tag is not string pluginId)
+            {
+                return;
+            }
+
+            try
+            {
+                if (!pluginManager.Plugins.TryGetValue(pluginId, out var plugin) || plugin == null)
+                {
+                    MessageBox.Show("未找到插件信息。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var pluginDirectory = plugin.ManifestDirectory;
+                if (string.IsNullOrWhiteSpace(pluginDirectory) || !Directory.Exists(pluginDirectory))
+                {
+                    MessageBox.Show("未找到插件解压目录，请刷新插件列表后重试。", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    return;
+                }
+
+                var codeEditor = new CodeEditor();
+                codeEditor.LoadPluginFromDirectory(pluginDirectory);
+
+                var tabItem = new TabItem
+                {
+                    Header = $"编辑 {plugin.Descriptor.Name}",
+                    Content = codeEditor,
+                    IsSelected = true
+                };
+
+                MainTabControl.Items.Add(tabItem);
+                StatusBar.Text = $"已打开插件 \"{plugin.Descriptor.Name}\" 的开发示例";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"打开插件编辑器失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
         private void DeletePlugin_Click(object sender, RoutedEventArgs e)
         {
             if (sender is Button button && button.Tag is string pluginId)
@@ -402,13 +462,8 @@ namespace Layouter.Plugins
                     {
                         try
                         {
-                            // 查找插件文件并删除
-                            var pluginFile = Directory.GetFiles(pluginsDirectory, "*.zip")
-                                .FirstOrDefault(f => Path.GetFileNameWithoutExtension(f) == pluginId);
-
-                            if (pluginFile != null && File.Exists(pluginFile))
+                            if (pluginManager.RemovePlugin(pluginId))
                             {
-                                File.Delete(pluginFile);
                                 RefreshPlugins();
                                 StatusBar.Text = $"插件 \"{plugin.Descriptor.Name}\" 已删除";
                             }

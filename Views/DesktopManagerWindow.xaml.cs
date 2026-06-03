@@ -8,6 +8,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using Layouter.Models;
 using Layouter.Services;
 using Layouter.Utility;
@@ -30,6 +31,8 @@ namespace Layouter.Views
         private bool isResizing = false; // 是否正在调整大小
         private double originalOpacity = 1.0; //窗口默认透明度
         private bool isAdjustingSize = false; // 是否正在调整窗口大小
+        private bool isSnapPending = false;
+        private DateTime lastSizeSnapTime = DateTime.MinValue;
 
         private DateTime lastClickTime = DateTime.MinValue;
         private DesktopIcon lastClickedIcon = null;
@@ -211,6 +214,7 @@ namespace Layouter.Views
                 {
                     isResizing = false;
                     UpdateWindowOpacity();
+                    QueueWindowSizeSnap();
                 }
             }
 
@@ -293,34 +297,17 @@ namespace Layouter.Views
         /// </summary>
         private void Window_SizeChanged(object sender, SizeChangedEventArgs e)
         {
-            vm.PartitionWidth = this.Width;
-            vm.PartitionHeight = this.Height;
+            UpdatePartitionSizeFromLayout();
 
             // 调整窗口尺寸
-            if (!isAdjustingSize)
-            {
-                //AdjustWindowSizeToIconGrid();
-            }
-
             // 如果不是卷起状态,更新保存的窗口高度
             if (this.Height > TitleBarHeight)
             {
                 windowHeight = this.Height;
             }
 
-            // 使用延迟重置调整状态
-            Task.Delay(500).ContinueWith(_ =>
-            {
-                Dispatcher.Invoke(() =>
-                {
-                    (DataContext as DesktopManagerViewModel)?.ArrangeIcons();
-
-                    UpdateWindowOpacity();
-
-                    // 重置调整标志
-                    isAdjustingSize = false;
-                });
-            });
+            vm.ArrangeIcons();
+            UpdateWindowOpacity();
         }
 
         private void Window_StateChanged(object sender, EventArgs e)
@@ -350,57 +337,91 @@ namespace Layouter.Views
         /// <summary>
         /// 按图标大小的整倍数调整窗口尺寸
         /// </summary>
-        //private void AdjustWindowSizeToIconGrid()
-        //{
-        //    if (vm == null)
-        //    {
-        //        return;
-        //    }
+        private void SnapWindowSizeToIconGrid()
+        {
+            if (vm == null || vm.IsLocked || isRolledUp || isAdjustingSize)
+            {
+                return;
+            }
 
-        //    // 获取当前图标大小
-        //    double iconSize = 0;
+            var cellSize = vm.GetIconCellSize();
+            if (cellSize.Width <= 0 || cellSize.Height <= 0)
+            {
+                return;
+            }
 
-        //    switch (vm.IconSize)
-        //    {
-        //        case IconSize.Small:
-        //            iconSize = 32;
-        //            break;
-        //        case IconSize.Medium:
-        //            iconSize = 48;
-        //            break;
-        //        case IconSize.Large:
-        //            iconSize = 64;
-        //            break;
-        //        default:
-        //            iconSize = 48;
-        //            break;
-        //    }
+            var spacing = DesktopManagerViewModel.IconSpacing;
+            var titleHeight = GetTitleBarHeight();
+            var iconMargin = iconsContainer?.Margin ?? new Thickness(0);
+            var availableWidth = Math.Max(cellSize.Width + spacing * 2, Width - iconMargin.Left - iconMargin.Right);
+            var availableHeight = Math.Max(cellSize.Height + spacing * 2, Height - titleHeight - iconMargin.Top - iconMargin.Bottom);
 
-        //    // 考虑图标间距
-        //    var iconSpacing = DesktopManagerViewModel.IconSpacing;
-        //    double gridSize = iconSize + iconSpacing;
+            var columns = Math.Max(1, (int)Math.Round((availableWidth - spacing) / (cellSize.Width + spacing)));
+            var rows = Math.Max(1, (int)Math.Round((availableHeight - spacing) / (cellSize.Height + spacing)));
 
-        //    // 计算内容区域的宽高（减去标题栏高度）
-        //    double contentWidth = this.Width;
-        //    double contentHeight = this.Height - TitleBar.ActualHeight;
+            var newAvailableWidth = columns * cellSize.Width + (columns + 1) * spacing;
+            var newAvailableHeight = rows * cellSize.Height + (rows + 1) * spacing;
+            var newWidth = Math.Ceiling(newAvailableWidth + iconMargin.Left + iconMargin.Right);
+            var newHeight = Math.Ceiling(titleHeight + newAvailableHeight + iconMargin.Top + iconMargin.Bottom);
 
-        //    // 计算整倍数的宽高
-        //    int columnsCount = Math.Max(1, (int)Math.Ceiling(contentWidth / gridSize));
-        //    int rowsCount = Math.Max(1, (int)Math.Ceiling(contentHeight / gridSize));
+            if (Math.Abs(Width - newWidth) > 0.5 || Math.Abs(Height - newHeight) > 0.5)
+            {
+                try
+                {
+                    isAdjustingSize = true;
+                    Width = newWidth;
+                    Height = newHeight;
+                    UpdatePartitionSizeFromLayout();
+                    vm.ArrangeIcons();
+                    lastSizeSnapTime = DateTime.UtcNow;
+                }
+                finally
+                {
+                    isAdjustingSize = false;
+                }
+            }
+        }
 
-        //    // 调整窗口大小为整倍数
-        //    double newWidth = columnsCount * gridSize + iconSpacing;
-        //    double newHeight = rowsCount * gridSize + TitleBar.ActualHeight + iconSpacing;
+        private void QueueWindowSizeSnap()
+        {
+            if (isSnapPending || DateTime.UtcNow - lastSizeSnapTime < TimeSpan.FromMilliseconds(250))
+            {
+                return;
+            }
 
-        //    // 如果大小有变化,则调整窗口大小
-        //    if (Math.Abs(this.Width - newWidth) > 1 || Math.Abs(this.Height - newHeight) > 1)
-        //    {
-        //        isAdjustingSize = true;
+            isSnapPending = true;
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                try
+                {
+                    SnapWindowSizeToIconGrid();
+                }
+                finally
+                {
+                    isSnapPending = false;
+                }
+            }), DispatcherPriority.ContextIdle);
+        }
 
-        //        this.Width = newWidth;
-        //        this.Height = newHeight;
-        //    }
-        //}
+        private void UpdatePartitionSizeFromLayout()
+        {
+            if (vm == null)
+            {
+                return;
+            }
+
+            var iconMargin = iconsContainer?.Margin ?? new Thickness(0);
+            var width = IconsContainer?.ActualWidth > 0 ? IconsContainer.ActualWidth : Width;
+            var height = IconsContainer?.ActualHeight > 0 ? IconsContainer.ActualHeight : Math.Max(0, Height - GetTitleBarHeight());
+
+            vm.PartitionWidth = Math.Max(1, width - iconMargin.Left - iconMargin.Right);
+            vm.PartitionHeight = Math.Max(1, height - iconMargin.Top - iconMargin.Bottom);
+        }
+
+        private double GetTitleBarHeight()
+        {
+            return TitleBar?.ActualHeight > 0 ? TitleBar.ActualHeight : TitleBarHeight;
+        }
 
         #endregion
 

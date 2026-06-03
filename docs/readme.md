@@ -7,8 +7,10 @@
 
 </div>
 
-## New version preview
-- Plugin functionality will be available soon :smile:
+---
+
+> ### The long-awaited new version is here! 
+> It adds plugin functionality and improves the UI.
 
 ## Features
 
@@ -21,6 +23,9 @@
 ## Changelog
 [changelog.md](./changelog.md)
 
+## Plugin Development Documentation 
+[plugin_development.md](./plugin_development.md)
+
 ## Shortcuts
 
 - Desktop window  
@@ -32,10 +37,15 @@
 - Tray Menu  
 ![screenshot](./images/03.png)
 
+- Plugin List  
+![screenshot](./images/04.png)
+
+- Plugin Editing  
+![screenshot](./images/05.png)
+
 ## What is being planned for next version
 
-- Support for plugins
-- Support config backup
+- find and fix bug.
 
 ## Feedback
 

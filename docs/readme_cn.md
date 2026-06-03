@@ -7,8 +7,10 @@
 
 </div>
 
-## 新版本预告
-- 插件功能将很快来袭 :smile:
+---
+
+> ### 新版本来袭! 
+> 新增了插件模块并优化了用户界面.
 
 ## 特性
 
@@ -21,6 +23,9 @@
 ## 更新日志
 [changelog.md](./changelog.md)
 
+## 插件开发文档   
+[plugin_development.md](./plugin_development_cn.md)
+
 ## 截图
 
 - 桌面窗口  
@@ -32,10 +37,15 @@
 - 托盘图标    
 ![screenshot](./images/03.png)
 
+- 插件列表  
+![screenshot](./images/04.png)
+
+- 插件编辑  
+![screenshot](./images/05.png)
+
 ## 新版本计划
 
-- 支持插件
-- 支持配置备份
+- Bug修复
 
 ## 反馈
 

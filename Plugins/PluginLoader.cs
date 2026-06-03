@@ -18,6 +18,7 @@ namespace Layouter.Plugins
         private readonly string pluginsDirectory;
         private readonly List<Assembly> loadedAssemblies = new List<Assembly>();
         private readonly Dictionary<string, string> pluginExtractionPaths = new Dictionary<string, string>();
+        private readonly Dictionary<string, string> pluginManifestDirectories = new Dictionary<string, string>();
         private readonly Dictionary<string, LoadedPlugin> metadataLoadedPlugins = new Dictionary<string, LoadedPlugin>();
         private readonly PluginManager pluginManager;
 
@@ -31,14 +32,14 @@ namespace Layouter.Plugins
         public IEnumerable<LoadedPlugin> LoadPluginMetadata()
         {
             var loadedPlugins = new List<LoadedPlugin>();
-            var plugFiles = Directory.GetFiles(pluginsDirectory, "*.plug");
+            var plugFiles = Directory.GetFiles(pluginsDirectory, $"*{PluginProtocol.PackageExtension}");
 
             foreach (var plugFile in plugFiles)
             {
                 try
                 {
-                    var pluginId = Path.GetFileNameWithoutExtension(plugFile);
-                    var tempDir = Path.Combine(Path.GetTempPath(), "Plugins", pluginId);
+                    var packageName = Path.GetFileNameWithoutExtension(plugFile);
+                    var tempDir = Path.Combine(Path.GetTempPath(), "Layouter", "Plugins", packageName);
 
                     // 清理之前可能存在的目录
                     if (Directory.Exists(tempDir))
@@ -46,14 +47,13 @@ namespace Layouter.Plugins
                         Directory.Delete(tempDir, true);
                     }
                     Directory.CreateDirectory(tempDir);
-                    pluginExtractionPaths[pluginId] = tempDir;
 
                     ZipFile.ExtractToDirectory(plugFile, tempDir);
 
                     var jsonFiles = Directory.GetFiles(tempDir, "*.json", SearchOption.AllDirectories);
 
                     #region 插件描述文件
-                    var descriptorFile = jsonFiles.FirstOrDefault(f => Path.GetFileName(f).Contains("plugin", StringComparison.OrdinalIgnoreCase));
+                    var descriptorFile = FindPluginFile(jsonFiles, PluginProtocol.ManifestFileName);
 
                     if (descriptorFile == null)
                     {
@@ -66,20 +66,30 @@ namespace Layouter.Plugins
                     // 设置ID以便跟踪
                     if (string.IsNullOrEmpty(descriptor.Id))
                     {
-                        descriptor.Id = pluginId;
+                        descriptor.Id = packageName;
                     }
+
+                    if (string.IsNullOrWhiteSpace(descriptor.ProtocolVersion))
+                    {
+                        descriptor.ProtocolVersion = PluginProtocol.CurrentVersion;
+                    }
+
+                    var manifestDirectory = Path.GetDirectoryName(descriptorFile);
+                    pluginExtractionPaths[descriptor.Id] = tempDir;
+                    pluginManifestDirectories[descriptor.Id] = manifestDirectory;
 
                     #endregion
 
                     #region 图标描述文件
 
                     IconDescriptor iconDescriptor = null;
-                    var iconFile = jsonFiles.FirstOrDefault(f => Path.GetFileName(f).Contains("icon", StringComparison.OrdinalIgnoreCase));
+                    var iconFile = FindPluginFile(jsonFiles, PluginProtocol.IconFileName);
 
                     if (iconFile != null)
                     {
                         var iconJson = File.ReadAllText(iconFile);
                         iconDescriptor = IconDescriptor.FromJson(iconJson);
+                        iconDescriptor.ResolveRelativePaths(Path.GetDirectoryName(iconFile));
                     }
 
                     #endregion
@@ -87,7 +97,7 @@ namespace Layouter.Plugins
                     #region 样式描述文件
 
                     PluginStyle style = null;
-                    var styleFile = jsonFiles.FirstOrDefault(f => Path.GetFileName(f).Contains("style", StringComparison.OrdinalIgnoreCase));
+                    var styleFile = FindPluginFile(jsonFiles, PluginProtocol.StyleFileName);
                     if (styleFile != null)
                     {
                         var styleJson = File.ReadAllText(styleFile);
@@ -95,8 +105,24 @@ namespace Layouter.Plugins
                     }
                     #endregion
 
+                    var userSettings = PluginSettingsService.Instance.LoadPluginSettings(descriptor.Id);
+                    if (userSettings?.IsEnabled.HasValue == true)
+                    {
+                        descriptor.IsEnabled = userSettings.IsEnabled.Value;
+                    }
+                    if (userSettings?.Style != null)
+                    {
+                        style = userSettings.Style;
+                    }
+
                     // 创建只包含元数据的LoadedPlugin对象
-                    var lp = new LoadedPlugin(descriptor, null, iconDescriptor, style);
+                    var lp = new LoadedPlugin(descriptor, null, iconDescriptor, style)
+                    {
+                        PackageFilePath = plugFile,
+                        ExtractionDirectory = tempDir,
+                        ManifestDirectory = manifestDirectory,
+                        PackageName = packageName
+                    };
                     loadedPlugins.Add(lp);
 
                     // 保存到字典中，以便后续异步加载代码
@@ -111,16 +137,20 @@ namespace Layouter.Plugins
             return loadedPlugins;
         }
 
+        private static string FindPluginFile(IEnumerable<string> files, string fileName)
+        {
+            return files.FirstOrDefault(f => Path.GetFileName(f).Equals(fileName, StringComparison.OrdinalIgnoreCase));
+        }
+
         public class PluginCodeLoadResult
         {
-            public dynamic Plugin { get; set; }
+            public IPlugin Plugin { get; set; }
             public Dictionary<string, List<PluginParameter>> ParameterDescriptions { get; set; }
         }
 
         public async Task<PluginCodeLoadResult> LoadPluginCode(LoadedPlugin plugin)
         {
             string pluginId = plugin?.Descriptor?.Id;
-            string pluginKey = plugin?.Descriptor?.PluginClassName;
 
             try
             {
@@ -132,14 +162,14 @@ namespace Layouter.Plugins
                 }
 
                 // 获取插件解压路径
-                if (!pluginExtractionPaths.TryGetValue(pluginKey, out var tempDir) || !Directory.Exists(tempDir))
+                if (!pluginExtractionPaths.TryGetValue(pluginId, out var tempDir) || !Directory.Exists(tempDir))
                 {
                     Log.Error($"Plugin extraction path not found for {pluginId}");
                     return null;
                 }
 
                 var jsonFiles = Directory.GetFiles(tempDir, "*.json", SearchOption.AllDirectories);
-                var descriptorFile = jsonFiles.FirstOrDefault(f => Path.GetFileName(f).Contains("plugin", StringComparison.OrdinalIgnoreCase));
+                var descriptorFile = FindPluginFile(jsonFiles, PluginProtocol.ManifestFileName);
 
                 if (descriptorFile == null)
                 {
@@ -170,9 +200,10 @@ namespace Layouter.Plugins
 
                         // 进行安全检查
                         var securityChecker = new PluginSecurityChecker();
-                        if (!securityChecker.CheckCode(code))
+                        var validationResult = securityChecker.ValidateCode(code, descriptor);
+                        if (!validationResult.IsAllowed)
                         {
-                            Log.Error($"Security check failed for plugin {descriptor.Name}");
+                            Log.Error($"Security check failed for plugin {descriptor.Name}: {validationResult}");
                             return null;
                         }
 
@@ -190,8 +221,14 @@ namespace Layouter.Plugins
                             return null;
                         }
 
-                        var plugin = Activator.CreateInstance(pluginType) as dynamic;
-                        plugin.Register();
+                        if (!typeof(IPlugin).IsAssignableFrom(pluginType))
+                        {
+                            Log.Error($"Plugin class {descriptor.PluginClassName} must implement IPlugin");
+                            return null;
+                        }
+
+                        var plugin = Activator.CreateInstance(pluginType) as IPlugin;
+                        plugin?.Register();
 
                         Dictionary<string, List<PluginParameter>> parameterDescriptions = null;
                         try
@@ -259,6 +296,11 @@ namespace Layouter.Plugins
         public string GetPluginExtractionPath(string pluginId)
         {
             return pluginExtractionPaths.TryGetValue(pluginId, out var path) ? path : null;
+        }
+
+        public string GetPluginManifestDirectory(string pluginId)
+        {
+            return pluginManifestDirectories.TryGetValue(pluginId, out var path) ? path : null;
         }
 
         private Assembly CompileCode(string sourceCode, params string[] dllReferences)
@@ -329,7 +371,7 @@ namespace Layouter.Plugins
     {
         public PluginDescriptor Descriptor { get; }
 
-        public dynamic Plugin { get; private set; }
+        public IPlugin Plugin { get; private set; }
 
         public IconDescriptor IconDescriptor { get; }
 
@@ -339,7 +381,15 @@ namespace Layouter.Plugins
 
         public bool IsCodeLoaded => Plugin != null;
 
-        public LoadedPlugin(PluginDescriptor descriptor, dynamic plugin, IconDescriptor iconDescriptor, PluginStyle style = null, Dictionary<string, List<PluginParameter>> parameterDescriptions = null)
+        public string PackageFilePath { get; set; }
+
+        public string ExtractionDirectory { get; set; }
+
+        public string ManifestDirectory { get; set; }
+
+        public string PackageName { get; set; }
+
+        public LoadedPlugin(PluginDescriptor descriptor, IPlugin plugin, IconDescriptor iconDescriptor, PluginStyle style = null, Dictionary<string, List<PluginParameter>> parameterDescriptions = null)
         {
             Descriptor = descriptor;
             Plugin = plugin;
@@ -356,7 +406,7 @@ namespace Layouter.Plugins
             ParameterDescriptions = new Dictionary<string, List<PluginParameter>>();
         }
 
-        public void SetPlugin(dynamic plugin, Dictionary<string, List<PluginParameter>> parameterDescriptions)
+        public void SetPlugin(IPlugin plugin, Dictionary<string, List<PluginParameter>> parameterDescriptions)
         {
             Plugin = plugin;
             ParameterDescriptions = parameterDescriptions ?? new Dictionary<string, List<PluginParameter>>();

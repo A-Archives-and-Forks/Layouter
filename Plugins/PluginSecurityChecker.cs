@@ -8,6 +8,21 @@ using PluginEntry;
 
 namespace Layouter.Plugins
 {
+    public class PluginSecurityValidationResult
+    {
+        public bool IsAllowed { get; set; } = true;
+
+        public List<string> Errors { get; } = new List<string>();
+
+        public List<string> Warnings { get; } = new List<string>();
+
+        public override string ToString()
+        {
+            var messages = Errors.Concat(Warnings).ToList();
+            return messages.Count == 0 ? "No issues" : string.Join("; ", messages);
+        }
+    }
+
     public class PluginSecurityChecker
     {
         /// <summary>
@@ -25,7 +40,23 @@ namespace Layouter.Plugins
             @"Environment\.Exit",
             @"System\.Diagnostics\.EventLog",
             @"new\s+System\.Net\.Sockets\.TcpClient",
-            @"System\.Windows\.Forms\.Application\.Exit"
+            @"System\.Windows\.Forms\.Application\.Exit",
+            @"DllImport\s*\(",
+            @"Assembly\.Load",
+            @"File\.Delete\s*\(",
+            @"Directory\.Delete\s*\(",
+            @"Process\.Start\s*\(",
+            @"Environment\.Exit\s*\("
+        };
+
+        private readonly List<string> _warningPatterns = new List<string>
+        {
+            @"using\s+System\.IO",
+            @"using\s+System\.Net",
+            @"using\s+System\.Reflection",
+            @"using\s+System\.Diagnostics",
+            @"Microsoft\.Win32",
+            @"unsafe\s"
         };
 
         /// <summary>
@@ -33,12 +64,23 @@ namespace Layouter.Plugins
         /// </summary>
         public bool CheckCode(string sourceCode)
         {
+            return ValidateCode(sourceCode).IsAllowed;
+        }
+
+        public PluginSecurityValidationResult ValidateCode(string sourceCode, PluginDescriptor descriptor = null)
+        {
+            var result = new PluginSecurityValidationResult();
+
+            if (string.IsNullOrWhiteSpace(sourceCode))
+            {
+                result.Errors.Add("Plugin source code is empty.");
+            }
+
             foreach (var pattern in _forbiddenPatterns)
             {
                 if (Regex.IsMatch(sourceCode, pattern))
                 {
-                    Console.WriteLine($"Security violation: {pattern} detected in plugin code");
-                    return false;
+                    result.Errors.Add($"Forbidden API pattern detected: {pattern}");
                 }
             }
 
@@ -48,12 +90,32 @@ namespace Layouter.Plugins
                 // 进一步检查有没有使用危险类
                 if (Regex.IsMatch(sourceCode, @"Process\.|ProcessStartInfo"))
                 {
-                    Console.WriteLine("Security violation: Process manipulation detected");
-                    return false;
+                    result.Errors.Add("Process manipulation detected.");
                 }
             }
 
-            return true;
+            foreach (var pattern in _warningPatterns)
+            {
+                if (Regex.IsMatch(sourceCode, pattern))
+                {
+                    result.Warnings.Add($"Sensitive namespace or keyword detected: {pattern}");
+                }
+            }
+
+            if (!Regex.IsMatch(sourceCode, @":\s*IPlugin\b") && !Regex.IsMatch(sourceCode, @":\s*PluginEntry\.IPlugin\b"))
+            {
+                result.Errors.Add("Plugin class must implement IPlugin.");
+            }
+
+            if (descriptor?.AllowUnsafeApis == true)
+            {
+                result.Warnings.Add("AllowUnsafeApis is enabled; forbidden API errors were downgraded for development use.");
+                result.Warnings.AddRange(result.Errors);
+                result.Errors.Clear();
+            }
+
+            result.IsAllowed = result.Errors.Count == 0;
+            return result;
         }
 
         /// <summary>

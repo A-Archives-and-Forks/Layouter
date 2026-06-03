@@ -23,8 +23,8 @@ namespace Layouter.ViewModels
         // 图标间距
         public const double IconSpacing = 10;
 
-        private double IconAreaWidth = 64;
-        private double IconAreaHeight = 64;
+        private double IconAreaWidth = 68;
+        private double IconAreaHeight = 70;
 
         private string name;
         private double opacity = 0.90;
@@ -151,7 +151,17 @@ namespace Layouter.ViewModels
         public double IconTextSize
         {
             get => iconTextSize;
-            set => SetProperty(ref iconTextSize, value);
+            set
+            {
+                if (SetProperty(ref iconTextSize, value))
+                {
+                    UpdateIconSize();
+                    foreach (var icon in Icons)
+                    {
+                        icon.TextSize = value;
+                    }
+                }
+            }
         }
 
 
@@ -240,19 +250,19 @@ namespace Layouter.ViewModels
             {
                 case IconSize.Small:
                     iconSizeValue = new Size(32, 32);
-                    IconAreaWidth = 44;
-                    IconAreaHeight = 44;
+                    IconAreaWidth = 60;
+                    IconAreaHeight = Math.Ceiling(32 + 7 + IconTextSize * 1.35 + 4);
                     break;
                 case IconSize.Large:
                     iconSizeValue = new Size(64, 64);
                     IconAreaWidth = 84;
-                    IconAreaHeight = 84;
+                    IconAreaHeight = Math.Ceiling(64 + 7 + IconTextSize * 1.35 + 4);
                     break;
                 case IconSize.Medium:
                 default:
                     iconSizeValue = new Size(48, 48);
-                    IconAreaWidth = 64;
-                    IconAreaHeight = 64;
+                    IconAreaWidth = 68;
+                    IconAreaHeight = Math.Ceiling(48 + 7 + IconTextSize * 1.35 + 4);
                     break;
             }
 
@@ -321,6 +331,16 @@ namespace Layouter.ViewModels
                     break;
             }
             return size;
+        }
+
+        public Size GetIconCellSize()
+        {
+            if (IconAreaWidth <= 0 || IconAreaHeight <= 0)
+            {
+                UpdateIconSize();
+            }
+
+            return new Size(IconAreaWidth, IconAreaHeight);
         }
     }
 

@@ -121,8 +121,13 @@ namespace Layouter.ViewModels
 
                 // 获取所有分区数据
                 var metadata = PartitionDataService.Instance.GetMetadata();
+                if (metadata?.WindowIds == null || metadata.WindowIds.Count == 0)
+                {
+                    UpdateSelectionState();
+                    return;
+                }
 
-                foreach (var windowId in metadata.WindowIds)
+                foreach (var windowId in metadata.WindowIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct())
                 {
                     // 获取分区显示状态
                     bool isVisible = GeneralSettingsService.Instance.GetPartitionVisibility(windowId);
@@ -130,14 +135,19 @@ namespace Layouter.ViewModels
                     var settings = PartitionSettingsService.Instance.LoadWindowSettings(windowId);
                     //加载分区数据
                     var partitionData = PartitionDataService.Instance.GetPartitionData(windowId);
+                    if (partitionData == null)
+                    {
+                        Log.Information($"跳过缺少数据文件的分区: {windowId}");
+                        continue;
+                    }
 
                     // 创建分区项视图模型
                     var partitionItem = new PartitionItemViewModel
                     {
                         PartitionId = windowId,
-                        Title = partitionData.Name,
+                        Title = string.IsNullOrWhiteSpace(partitionData.Name) ? "未命名分区" : partitionData.Name,
                         IsVisible = isVisible,
-                        IsLocked = settings.IsLocked,
+                        IsLocked = settings?.IsLocked ?? false,
                         IsSelected = false
                     };
 
@@ -277,14 +287,15 @@ namespace Layouter.ViewModels
             {
                 var window = WindowManagerService.Instance.GetWindowById(partition.PartitionId);
 
-                if (window == null)
+                if (window != null)
                 {
-                    MessageBox.Show("分区窗口不存在,无法删除。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-                    return;
+                    // 关闭分区窗口
+                    WindowManagerService.Instance.RemovePartitionWindow(window);
                 }
-
-                // 关闭分区窗口
-                WindowManagerService.Instance.RemovePartitionWindow(window);
+                else
+                {
+                    PartitionDataService.Instance.RemoveWindow(partition.PartitionId);
+                }
 
                 // 从列表中移除
                 Partitions.Remove(partition);
@@ -362,13 +373,14 @@ namespace Layouter.ViewModels
                 foreach (var partition in selectedPartitions)
                 {
                     var window = WindowManagerService.Instance.GetWindowById(partition.PartitionId);
-                    WindowManagerService.Instance.RemovePartitionWindow(window);
-                    DeletePartition(partition);
-                }
-
-                // 从列表中移除
-                foreach (var partition in selectedPartitions)
-                {
+                    if (window != null)
+                    {
+                        WindowManagerService.Instance.RemovePartitionWindow(window);
+                    }
+                    else
+                    {
+                        PartitionDataService.Instance.RemoveWindow(partition.PartitionId);
+                    }
                     Partitions.Remove(partition);
                 }
             }

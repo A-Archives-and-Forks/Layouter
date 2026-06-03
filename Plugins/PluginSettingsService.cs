@@ -8,6 +8,13 @@ using Newtonsoft.Json;
 
 namespace Layouter.Plugins
 {
+    public class PluginUserSettings
+    {
+        public bool? IsEnabled { get; set; }
+
+        public PluginStyle Style { get; set; }
+    }
+
     public class PluginSettingsService
     {
         private static PluginSettingsService instance;
@@ -52,6 +59,58 @@ namespace Layouter.Plugins
                 Log.Information($"保存插件 {pluginId} 设置时出错: {ex.Message}");
                 return false;
             }
+        }
+
+        public PluginUserSettings LoadPluginSettings(string pluginId)
+        {
+            try
+            {
+                string filePath = GetSettingsFilePath(pluginId);
+                if (!File.Exists(filePath))
+                {
+                    return new PluginUserSettings();
+                }
+
+                var options = CreateJsonOptions();
+                return System.Text.Json.JsonSerializer.Deserialize<PluginUserSettings>(File.ReadAllText(filePath), options)
+                    ?? new PluginUserSettings();
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"加载插件 {pluginId} 用户配置时出错: {ex.Message}");
+                return new PluginUserSettings();
+            }
+        }
+
+        public bool SavePluginSettings(string pluginId, PluginUserSettings settings)
+        {
+            try
+            {
+                string filePath = GetSettingsFilePath(pluginId);
+                var options = CreateJsonOptions();
+                string json = System.Text.Json.JsonSerializer.Serialize(settings, options);
+                File.WriteAllText(filePath, json);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"保存插件 {pluginId} 用户配置时出错: {ex.Message}");
+                return false;
+            }
+        }
+
+        public bool SaveEnabled(string pluginId, bool enabled)
+        {
+            var settings = LoadPluginSettings(pluginId);
+            settings.IsEnabled = enabled;
+            return SavePluginSettings(pluginId, settings);
+        }
+
+        public bool SaveStyle(string pluginId, PluginStyle style)
+        {
+            var settings = LoadPluginSettings(pluginId);
+            settings.Style = style;
+            return SavePluginSettings(pluginId, settings);
         }
 
         /// <summary>
@@ -126,6 +185,16 @@ namespace Layouter.Plugins
         {
             // 使用插件ID作为文件名
             return Path.Combine(settingsFolder, $"{pluginId}.json");
+        }
+
+        private static System.Text.Json.JsonSerializerOptions CreateJsonOptions()
+        {
+            var options = new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true
+            };
+            options.Converters.Add(new ColorJsonConverter());
+            return options;
         }
     }
 }

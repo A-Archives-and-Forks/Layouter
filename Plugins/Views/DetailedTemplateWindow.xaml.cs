@@ -342,7 +342,6 @@ namespace Layouter.Plugins.Views
                 editStyle.WindowPosition.Top = this.Top;
                 SaveSettings(editStyle);
                 settingsWindow.Close();
-                OnSettingSaved?.Invoke(this, new SettingSavedEventArgs(editStyle));
             };
 
             // 取消按钮
@@ -622,55 +621,8 @@ namespace Layouter.Plugins.Views
         {
             try
             {
-                // 更新当前样式
                 Style = style;
-
-                // 序列化为JSON
-                var options = new JsonSerializerOptions
-                {
-                    WriteIndented = true
-                };
-                options.Converters.Add(new ColorJsonConverter());
-                string json = JsonSerializer.Serialize(style, options);
-
-                // 获取插件目录
-                string pluginsDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Utility.Env.AppName, "Plugins");
-                string pluginPath = Path.Combine(pluginsDirectory, $"{Key}.plug");
-
-                if (File.Exists(pluginPath))
-                {
-                    // 创建临时目录
-                    string tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
-                    Directory.CreateDirectory(tempDir);
-
-                    try
-                    {
-                        // 解压插件文件
-                        ZipFile.ExtractToDirectory(pluginPath, tempDir);
-
-                        // 更新style.json
-                        string stylePath = Path.Combine(tempDir, Key, "style.json");
-                        File.WriteAllText(stylePath, json);
-
-                        // 删除原插件文件
-                        File.Delete(pluginPath);
-
-                        // 重新打包
-                        ZipFile.CreateFromDirectory(tempDir, pluginPath);
-                    }
-                    finally
-                    {
-                        // 清理临时目录
-                        if (Directory.Exists(tempDir))
-                        {
-                            Directory.Delete(tempDir, true);
-                        }
-                    }
-                }
-                else
-                {
-                    MessageBox.Show($"找不到插件文件: {pluginPath}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
+                OnSettingSaved?.Invoke(this, new SettingSavedEventArgs(style));
             }
             catch (Exception ex)
             {

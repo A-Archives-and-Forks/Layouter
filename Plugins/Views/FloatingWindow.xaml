@@ -55,6 +55,17 @@
                        Width="30" Height="30" 
                        Visibility="Visible"
                        RenderOptions.BitmapScalingMode="HighQuality" />
+
+                <TextBlock x:Name="StatusTextBlock"
+                           Text=""
+                           Visibility="Collapsed"
+                           Foreground="White"
+                           FontSize="15"
+                           FontWeight="SemiBold"
+                           TextAlignment="Center"
+                           HorizontalAlignment="Center"
+                           VerticalAlignment="Center"
+                           TextWrapping="NoWrap"/>
                 
                 <!-- 悬停时显示的菜单图标 -->
                 <StackPanel x:Name="HoverMenu" 

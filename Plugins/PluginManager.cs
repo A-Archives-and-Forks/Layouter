@@ -51,6 +51,12 @@ namespace Layouter.Plugins
                     : plugin.Descriptor.Id;
 
                 plugin.Descriptor.Id = id;
+                if (plugins.ContainsKey(id))
+                {
+                    plugins[id] = plugin;
+                    continue;
+                }
+
                 plugins[id] = plugin;
 
                 PluginLoaded?.Invoke(this, new PluginLoadedEventArgs(plugin));
@@ -242,36 +248,29 @@ namespace Layouter.Plugins
             {
                 plugin.Descriptor.IsEnabled = enabled;
 
-                // 保存到插件描述文件
-                SavePluginDescriptor(plugin);
+                // 用户状态保存到 AppData，不回写插件包
+                PluginSettingsService.Instance.SaveEnabled(pluginId, enabled);
 
                 PluginStatusChanged?.Invoke(this, new PluginStatusChangedEventArgs(plugin, enabled));
             }
         }
 
-        private void SavePluginDescriptor(LoadedPlugin plugin)
+        public bool SavePluginStyle(string pluginId, PluginStyle style)
         {
             try
             {
-                // 找到插件包解压后的目录
-                string pluginExtractPath = loader.GetPluginExtractionPath(plugin.Descriptor.Id);
-                if (string.IsNullOrEmpty(pluginExtractPath)) return;
-
-                // 找到描述文件
-                var jsonFiles = Directory.GetFiles(pluginExtractPath, "*.json");
-                var descriptorFile = jsonFiles.FirstOrDefault(f => !Path.GetFileName(f).Contains("icon", StringComparison.OrdinalIgnoreCase));
-
-                if (string.IsNullOrEmpty(descriptorFile))
+                if (!plugins.TryGetValue(pluginId, out var plugin))
                 {
-                    return;
+                    return false;
                 }
-                // 保存更新后的描述
-                string json = JsonSerializer.Serialize(plugin.Descriptor, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(descriptorFile, json);
+
+                plugin.UpdateStyle(style);
+                return PluginSettingsService.Instance.SaveStyle(pluginId, style);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error saving plugin descriptor: {ex.Message}");
+                Log.Error($"Error saving plugin style: {ex.Message}");
+                return false;
             }
         }
 
@@ -282,8 +281,35 @@ namespace Layouter.Plugins
                 Log.Error($"Plugin with ID {pluginId} not found");
                 return null;
             }
-            var dict = plugin.Plugin.functionItemDict as IDictionary<string, object>;
-            return dict?.Keys.Cast<string>() ?? Enumerable.Empty<string>();
+            return plugin.Plugin?.FunctionDict?.Keys ?? Enumerable.Empty<string>();
+        }
+
+        public bool RemovePlugin(string pluginId)
+        {
+            if (!plugins.TryGetValue(pluginId, out var plugin))
+            {
+                return false;
+            }
+
+            try
+            {
+                plugin.Plugin?.Unregister();
+                if (!string.IsNullOrWhiteSpace(plugin.PackageFilePath) && File.Exists(plugin.PackageFilePath))
+                {
+                    File.Delete(plugin.PackageFilePath);
+                }
+
+                PluginSettingsService.Instance.DeleteSettings(pluginId);
+                plugins.Remove(pluginId);
+                pluginWindowStates.Remove(pluginId);
+                displayedPlugins.Remove(pluginId);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Error removing plugin {pluginId}: {ex.Message}");
+                return false;
+            }
         }
     }
 

@@ -2,6 +2,7 @@ using System;
 using System;
 using System.IO;
 using System.IO.Compression;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
@@ -14,6 +15,7 @@ using Newtonsoft.Json.Linq;
 using System.Collections.ObjectModel;
 using System.Collections.Generic;
 using System.Linq;
+using PluginEntry;
 
 namespace Layouter.Plugins.Controls
 {
@@ -54,6 +56,7 @@ namespace Layouter.Plugins.Controls
             // 初始化插件描述
             pluginDescriptor = new JObject
             {
+                { "ProtocolVersion", PluginProtocol.CurrentVersion },
                 {"Id", Guid.NewGuid().ToString() },
                 { "Key", "PluginTemplate" },
                 { "Name", "插件1" },
@@ -63,7 +66,9 @@ namespace Layouter.Plugins.Controls
                 { "Author", "VrezenStrijder" },
                 { "Style", 1 },
                 { "IsEnabled", true },
-                { "CodeFilePath", "./PluginTemplate.cs" }
+                { "CodeFilePath", "./PluginTemplate.cs" },
+                { "DevelopmentMode", true },
+                { "AllowUnsafeApis", false }
             };
 
             // 初始化文件列表
@@ -276,7 +281,7 @@ namespace Layouter.Plugins.Controls
 
         private void UpdateReadOnlyFields()
         {
-            PluginKeyTextBox.Text = pluginDescriptor["Id"]?.ToString() ?? "";
+            PluginIdTextBox.Text = pluginDescriptor["Id"]?.ToString() ?? "";
             PluginKeyTextBox.Text = pluginDescriptor["Key"]?.ToString() ?? "";
             PluginCodeFilePathTextBox.Text = pluginDescriptor["CodeFilePath"]?.ToString() ?? "";
         }
@@ -420,6 +425,13 @@ namespace Layouter.Plugins.Controls
                     }
                 }
 
+                var descriptor = pluginDescriptor.ToObject<PluginDescriptor>();
+                var securityResult = new PluginSecurityChecker().ValidateCode(code, descriptor);
+                if (!securityResult.IsAllowed)
+                {
+                    return securityResult.ToString();
+                }
+
                 return string.Empty; // 没有错误
             }
             catch (Exception ex)
@@ -460,6 +472,108 @@ namespace Layouter.Plugins.Controls
         }
 
         // 确保控件加载完成后更新JSON文本框
+        public void LoadPluginFromDirectory(string pluginDirectory)
+        {
+            if (string.IsNullOrWhiteSpace(pluginDirectory) || !Directory.Exists(pluginDirectory))
+            {
+                throw new DirectoryNotFoundException($"Plugin directory not found: {pluginDirectory}");
+            }
+
+            var manifestPath = Path.Combine(pluginDirectory, PluginProtocol.ManifestFileName);
+            if (!File.Exists(manifestPath))
+            {
+                throw new FileNotFoundException($"Plugin manifest not found: {manifestPath}");
+            }
+
+            currentPluginDirectory = pluginDirectory;
+            pluginFiles.Clear();
+            fileContents.Clear();
+            originalFilePaths.Clear();
+
+            pluginFiles.Add(new PluginFileItem
+            {
+                Name = "插件文件",
+                IsDirectory = true,
+                IsExpanded = true,
+                FullPath = "插件文件"
+            });
+
+            FileTreeView.ItemsSource = pluginFiles;
+            FileTreeView.AllowDrop = false;
+
+            var manifestJson = File.ReadAllText(manifestPath, Encoding.UTF8);
+            pluginDescriptor = JObject.Parse(manifestJson);
+            EnsureDescriptorDefaults();
+
+            foreach (var filePath in Directory.EnumerateFiles(pluginDirectory, "*", SearchOption.AllDirectories))
+            {
+                var relativePath = Path.GetRelativePath(pluginDirectory, filePath).Replace('\\', '/');
+                if (IsTextPluginFile(filePath))
+                {
+                    AddFileToList(relativePath, File.ReadAllText(filePath, Encoding.UTF8));
+                }
+                else
+                {
+                    AddFileToList(relativePath, $"[binary file: {relativePath}]");
+                    originalFilePaths[relativePath] = filePath;
+                    originalFilePaths[Path.GetFileNameWithoutExtension(relativePath)] = filePath;
+                }
+            }
+
+            var mainFilePath = GetMainFilePath();
+            if (!fileContents.ContainsKey(mainFilePath))
+            {
+                mainFilePath = fileContents.Keys.FirstOrDefault(p => p.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+                    ?? PluginProtocol.ManifestFileName;
+            }
+
+            currentFilePath = mainFilePath;
+            aeEditor.Text = fileContents.TryGetValue(mainFilePath, out var content) ? content : string.Empty;
+            SetEditorSyntax(mainFilePath);
+            UpdateFormFromPluginDescriptor();
+            RefreshFileTree();
+        }
+
+        private void EnsureDescriptorDefaults()
+        {
+            pluginDescriptor["ProtocolVersion"] ??= PluginProtocol.CurrentVersion;
+            pluginDescriptor["Id"] ??= Guid.NewGuid().ToString();
+            pluginDescriptor["Key"] ??= pluginDescriptor["PluginClassName"]?.ToString()?.ToLowerInvariant() ?? "plugin";
+            pluginDescriptor["Version"] ??= "1.0.0";
+            pluginDescriptor["Style"] ??= 1;
+            pluginDescriptor["IsEnabled"] ??= true;
+            pluginDescriptor["CodeFilePath"] ??= $"./{pluginDescriptor["PluginClassName"]?.ToString() ?? "PluginTemplate"}.cs";
+            pluginDescriptor["DevelopmentMode"] ??= true;
+            pluginDescriptor["AllowUnsafeApis"] ??= false;
+        }
+
+        private static bool IsTextPluginFile(string filePath)
+        {
+            var extension = Path.GetExtension(filePath).ToLowerInvariant();
+            return extension is ".cs" or ".json" or ".xaml" or ".xml" or ".txt" or ".md" or ".config" or ".props" or ".targets";
+        }
+
+        private void SetEditorSyntax(string filePath)
+        {
+            string extension = Path.GetExtension(filePath).ToLowerInvariant();
+            switch (extension)
+            {
+                case ".cs":
+                    aeEditor.SyntaxHighlighting = ICSharpCode.AvalonEdit.Highlighting.HighlightingManager.Instance.GetDefinition("C#");
+                    break;
+                case ".xml":
+                case ".xaml":
+                    aeEditor.SyntaxHighlighting = ICSharpCode.AvalonEdit.Highlighting.HighlightingManager.Instance.GetDefinition("XML");
+                    break;
+                case ".json":
+                    aeEditor.SyntaxHighlighting = ICSharpCode.AvalonEdit.Highlighting.HighlightingManager.Instance.GetDefinition("JavaScript");
+                    break;
+                default:
+                    aeEditor.SyntaxHighlighting = null;
+                    break;
+            }
+        }
+
         public override void OnApplyTemplate()
         {
             base.OnApplyTemplate();
@@ -547,7 +661,7 @@ namespace Layouter.Plugins.Controls
                 }
 
                 // 打开选中的文件
-                currentFilePath = selectedItem.Name;
+                currentFilePath = selectedItem.FullPath;
 
                 // 如果文件内容不存在，创建空内容
                 if (!fileContents.ContainsKey(currentFilePath))
@@ -726,7 +840,7 @@ namespace Layouter.Plugins.Controls
                     },
                     { "Opacity", 0.8 },
                     { "CycleExecution", false },
-                    { "RefreshInterval", 5000 }
+                    { "Inteval", 1 }
                 };
 
                 // 添加默认内容
@@ -901,8 +1015,19 @@ namespace Layouter.Plugins.Controls
 
         private string GetMainFilePath()
         {
+            var codeFilePath = pluginDescriptor["CodeFilePath"]?.ToString();
+            if (!string.IsNullOrWhiteSpace(codeFilePath))
+            {
+                return NormalizePluginRelativePath(codeFilePath);
+            }
+
             string className = pluginDescriptor["PluginClassName"]?.ToString() ?? "Plugin1";
             return $"{className}.cs";
+        }
+
+        private static string NormalizePluginRelativePath(string path)
+        {
+            return path.Trim().TrimStart('.', '/', '\\').Replace('\\', '/');
         }
 
         // 为icons目录添加文件 - 使用文件选择对话框
@@ -1097,7 +1222,7 @@ namespace Layouter.Plugins.Controls
                         },
                         { "Opacity", 0.8 },
                         { "CycleExecution", false },
-                        { "RefreshInterval", 5000 }
+                        { "Inteval", 1 }
                     };
                     fileContents["style.json"] = JsonConvert.SerializeObject(defaultStyle, Formatting.Indented);
                 }
@@ -1158,7 +1283,7 @@ namespace Layouter.Plugins.Controls
                 // 保存插件描述文件 - 从右侧插件描述中获取
                 // 更新CodeFilePath确保与主文件名一致
                 string className = pluginDescriptor["PluginClassName"]?.ToString() ?? "Plugin1";
-                pluginDescriptor["CodeFilePath"] = $"./{className}.cs";
+                pluginDescriptor["CodeFilePath"] = $"./{mainFilePath.Replace('\\', '/')}";
 
                 string pluginJsonPath = Path.Combine(folderPath, "plugin.json");
                 File.WriteAllText(pluginJsonPath, JsonConvert.SerializeObject(pluginDescriptor, Formatting.Indented));

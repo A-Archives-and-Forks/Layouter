@@ -10,7 +10,7 @@
         WindowStartupLocation="CenterScreen" ResizeMode="NoResize">
 
     <Window.Resources>
-        <Style TargetType="GroupBox">
+        <Style TargetType="GroupBox" BasedOn="{StaticResource {x:Type GroupBox}}">
             <Setter Property="Margin" Value="5" />
             <Setter Property="Padding" Value="5" />
         </Style>
@@ -18,7 +18,7 @@
             <Setter Property="VerticalAlignment" Value="Center" />
             <Setter Property="Margin" Value="0,5" />
         </Style>
-        <Style TargetType="ComboBox">
+        <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
             <Setter Property="Margin" Value="5" />
             <Setter Property="MinWidth" Value="120" />
         </Style>
@@ -26,7 +26,7 @@
             <Setter Property="Margin" Value="5" />
             <Setter Property="MinWidth" Value="120" />
         </Style>
-        <Style TargetType="Button">
+        <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
             <Setter Property="Margin" Value="5" />
             <Setter Property="Padding" Value="10,5" />
             <Setter Property="MinWidth" Value="80" />

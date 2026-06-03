@@ -1,0 +1,12 @@
+{
+    "Id": "A1F53338-C00E-4D67-AABB-32FE86529C2E",
+    "Key": "SysCheckPlugin",
+    "Name": "系统资源监控",
+    "PluginClassName": "SysCheckPlugin",
+    "Version": "1.0.0",
+    "Description": "监控系统CPU、内存和交换空间使用率",
+    "Author": "Layouter",
+    "Style": 2,
+    "IsEnabled": true,
+    "CodeFilePath": "SysCheckPlugin.cs"
+}

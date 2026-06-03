@@ -6,31 +6,44 @@
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<UseWPF>true</UseWPF>
-		<AssemblyVersion>1.0.4.0</AssemblyVersion>
-		<FileVersion>1.0.4.0</FileVersion>
+		<AssemblyVersion>2.0.0.0</AssemblyVersion>
+		<FileVersion>2.0.0.0</FileVersion>
 		<ApplicationIcon>Resources\icon.ico</ApplicationIcon>
 
 		<Product>桌面助手(Layouter)</Product>
 		<Authors>@VrezenStrijder</Authors>
 		<Copyright>Copyright © 2025 @VrezenStrijder. All rights reserved.</Copyright>
 		<AssemblyTitle>Layouter</AssemblyTitle>
-		<Version>1.0.4</Version>
+		<Version>2.0.0</Version>
 	</PropertyGroup>
 
 	<ItemGroup>
+		<Compile Remove="Plugins\Deprecated\**" />
+		<Compile Remove="Plugins\Models\**" />
 		<Compile Remove="Plugins\SysCheckPlugin\**" />
 		<Compile Remove="Resources\Images\**" />
+		<Compile Remove="SysCheckPlugin\**" />
+		<EmbeddedResource Remove="Plugins\Deprecated\**" />
+		<EmbeddedResource Remove="Plugins\Models\**" />
 		<EmbeddedResource Remove="Plugins\SysCheckPlugin\**" />
 		<EmbeddedResource Remove="Resources\Images\**" />
+		<EmbeddedResource Remove="SysCheckPlugin\**" />
+		<None Remove="Plugins\Deprecated\**" />
+		<None Remove="Plugins\Models\**" />
 		<None Remove="Plugins\SysCheckPlugin\**" />
 		<None Remove="Resources\Images\**" />
+		<None Remove="SysCheckPlugin\**" />
+		<Page Remove="Plugins\Deprecated\**" />
+		<Page Remove="Plugins\Models\**" />
 		<Page Remove="Plugins\SysCheckPlugin\**" />
 		<Page Remove="Resources\Images\**" />
+		<Page Remove="SysCheckPlugin\**" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<Compile Remove="MainWindow.xaml.cs" />
 		<Compile Remove="Models\Configuration.cs" />
+		<Compile Remove="Plugins\LoadedPlugin.cs" />
 		<Compile Remove="Plugins\PluginDemoWindow.xaml.cs" />
 		<Compile Remove="Plugins\TemplateManager.cs" />
 		<Compile Remove="Services\ConfigurationService.cs" />
@@ -72,7 +85,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <ProjectReference Include="..\PluginEntry\PluginEntry.csproj" />
+		<ProjectReference Include="..\LayouterPlugins\PluginEntry\PluginEntry.csproj" />
 	</ItemGroup>
 
 	<ItemGroup>

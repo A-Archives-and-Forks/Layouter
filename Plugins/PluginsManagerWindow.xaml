@@ -40,10 +40,11 @@
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
                                 </GridViewColumn>
-                                <GridViewColumn Header="操作" Width="150">
+                                <GridViewColumn Header="操作" Width="210">
                                     <GridViewColumn.CellTemplate>
                                         <DataTemplate>
                                             <StackPanel Orientation="Horizontal">
+                                                <Button Content="编辑" Margin="2" Click="EditPlugin_Click" Tag="{Binding Id}"/>
                                                 <Button Content="参数设置" Margin="2" Click="PluginSettings_Click" Tag="{Binding Id}"/>
                                                 <Button Content="删除" Margin="2" Click="DeletePlugin_Click" Tag="{Binding Id}"/>
                                             </StackPanel>

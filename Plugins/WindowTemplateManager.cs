@@ -119,7 +119,7 @@ namespace Layouter.Plugins
             detailedWindow.OnSettingSaved += (s, e) =>
             {
                 plugin.UpdateStyle(e.Style);
-                //LoadDetailWindow(plugin, detailedWindow);
+                pluginManager.SavePluginStyle(plugin.Descriptor.Id, e.Style);
             };
 
 
@@ -129,7 +129,6 @@ namespace Layouter.Plugins
                 // 根据插件内容动态填充列表项
                 if (plugin.IsCodeLoaded)
                 {
-                    plugin.Plugin.Register();
                     LoadDetailWindow(plugin, detailedWindow);
                 }
                 else
@@ -146,7 +145,6 @@ namespace Layouter.Plugins
                         // 在UI线程更新界面
                         Application.Current.Dispatcher.Invoke(() =>
                         {
-                            plugin.Plugin.Register();
                             LoadDetailWindow(plugin, detailedWindow);
                         });
                     });
@@ -294,6 +292,7 @@ namespace Layouter.Plugins
             floatingWindow.OnSettingSaved += (s, e) =>
             {
                 plugin.UpdateStyle(e.Style);
+                pluginManager.SavePluginStyle(plugin.Descriptor.Id, e.Style);
             };
 
             // 尝试加载插件的样式文件
@@ -302,7 +301,6 @@ namespace Layouter.Plugins
                 // 根据插件内容动态填充菜单项
                 if (plugin.IsCodeLoaded)
                 {
-                    plugin.Plugin.Register();
                     LoadFloatingWindowMenu(plugin, floatingWindow);
                 }
                 else
@@ -318,7 +316,6 @@ namespace Layouter.Plugins
                         // 在UI线程更新界面
                         Application.Current.Dispatcher.Invoke(() =>
                         {
-                            plugin.Plugin.Register();
                             LoadFloatingWindowMenu(plugin, floatingWindow);
                         });
                     });
@@ -353,8 +350,27 @@ namespace Layouter.Plugins
 
             if (dict != null && dict.Count > 0)
             {
+                var statusKey = dict.Keys.FirstOrDefault(k => k.Contains("占用率") || k.Contains("当前内存"));
+                var detailsKey = dict.Keys.FirstOrDefault(k => k.Contains("详情"));
+                var cleanupKey = dict.Keys.FirstOrDefault(k => k.Contains("内存整理") || k.Contains("完整整理") || k == "整理工作集");
+
+                if (!string.IsNullOrEmpty(statusKey))
+                {
+                    window.ConfigureStatusProvider(
+                        () => plugin.Plugin.Run(statusKey),
+                        string.IsNullOrEmpty(detailsKey) ? null : () => plugin.Plugin.Run(detailsKey),
+                        string.IsNullOrEmpty(cleanupKey) ? null : () => plugin.Plugin.Run(cleanupKey),
+                        TimeSpan.FromSeconds(Math.Max(1, window.Style?.Inteval ?? 1)));
+                }
+
                 foreach (var key in dict.Keys)
                 {
+                    if (!string.IsNullOrEmpty(statusKey) &&
+                        (key == statusKey || key == detailsKey || key == cleanupKey))
+                    {
+                        continue;
+                    }
+
                     string iconPath = null;
 
                     // 尝试获取图标路径

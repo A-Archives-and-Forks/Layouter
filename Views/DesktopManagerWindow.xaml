@@ -84,17 +84,17 @@
                             <!-- 功能按钮区域 -->
                             <StackPanel Orientation="Horizontal" Grid.Column="1">
                                 <!-- 新增分区按钮 -->
-                                <Button Width="30" Height="30" ToolTip="新建分区"  Background="Transparent" BorderThickness="0" Click="NewPartition_Click" x:Name="NewPartitionButton">
+                                <Button Width="30" Height="30" Padding="0" ToolTip="新建分区"  Background="Transparent" BorderThickness="0" Click="NewPartition_Click" x:Name="NewPartitionButton">
                                     <FluentIcons:SymbolIcon Symbol="Add" FontSize="16" Foreground="{Binding TitleForeground}" />
                                 </Button>
 
                                 <!-- 锁定按钮 -->
-                                <Button Width="30" Height="30" ToolTip="未锁定"  Background="Transparent" BorderThickness="0" Click="LockButton_Click" x:Name="LockButton">
+                                <Button Width="30" Height="30" Padding="0" ToolTip="未锁定"  Background="Transparent" BorderThickness="0" Click="LockButton_Click" x:Name="LockButton">
                                     <FluentIcons:SymbolIcon Symbol="LockOpen" FontSize="16" Foreground="{Binding TitleForeground}" x:Name="LockIcon" />
                                 </Button>
 
                                 <!-- 设置按钮 -->
-                                <Button Width="30" Height="30" ToolTip="设置" Background="Transparent" BorderThickness="0" Click="Settings_Click" x:Name="SettingsButton">
+                                <Button Width="30" Height="30" Padding="0" ToolTip="设置" Background="Transparent" BorderThickness="0" Click="Settings_Click" x:Name="SettingsButton">
                                     <FluentIcons:SymbolIcon Symbol="Settings" FontSize="16" Foreground="{Binding TitleForeground}" />
                                 </Button>
                             </StackPanel>

@@ -11,6 +11,7 @@ using Layouter.Models;
 using Layouter.Services;
 using Layouter.ViewModels;
 using Layouter.Views;
+using Layouter.Plugins;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -68,6 +69,14 @@ namespace Layouter
             services.AddSingleton<DesktopIconService>();
             services.AddSingleton<PartitionDataService>();
             services.AddSingleton<WindowManagerService>();
+            services.AddSingleton(sp =>
+            {
+                string pluginsDirectory = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    Env.AppName,
+                    "Plugins");
+                return new Plugins.PluginManager(pluginsDirectory);
+            });
 
             services.AddSingleton<TrayIconViewModel>();
             services.AddSingleton<DesktopManagerViewModel>();
@@ -176,12 +185,7 @@ namespace Layouter
         {
             try
             {
-                // 使用AppData作为插件目录
-                string pluginsDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), Env.AppName, "Plugins");
-                Directory.CreateDirectory(pluginsDirectory);
-
-                // 创建插件管理器并加载插件元数据
-                var pluginManager = new Plugins.PluginManager(pluginsDirectory);
+                var pluginManager = serviceProvider.GetRequiredService<Plugins.PluginManager>();
                 
                 // 加载插件元数据并自动显示插件窗口
                 pluginManager.LoadPluginsMetadata(true);
@@ -195,6 +199,5 @@ namespace Layouter
         }
     }
 }
-
 
 
